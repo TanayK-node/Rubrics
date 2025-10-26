@@ -36,7 +36,7 @@ safety_settings = [
 ]
 # Use a model that's good with text and reasoning, like 1.5 Pro
 model = genai.GenerativeModel(
-    model_name="gemini-2.5-pro-latest",
+    model_name="gemini-1.5-pro-latest",
     generation_config=generation_config,
     safety_settings=safety_settings
 )
