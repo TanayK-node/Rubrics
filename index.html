@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Grader</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 20px; background: #f7f7f7; }
+        .container { max-width: 1000px; margin: auto; background: #fff; padding: 25px; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
+        h1 { text-align: center; color: #333; }
+        .input-section { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+        .input-box { display: flex; flex-direction: column; }
+        textarea { width: 100%; height: 400px; padding: 12px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 5px; font-size: 14px; }
+        input[type="file"] { width: 100%; padding: 10px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 5px; background: #fcfcfc; }
+        button { display: block; width: 100%; padding: 18px; background: #007bff; color: white; border: none; border-radius: 5px; font-size: 18px; font-weight: 600; cursor: pointer; margin-top: 25px; transition: background 0.3s; }
+        button:hover { background: #0056b3; }
+        button:disabled { background: #ccc; cursor: not-allowed; }
+        #results { margin-top: 30px; background: #fafafa; padding: 20px; border: 1px solid #ddd; border-radius: 5px; white-space: pre-wrap; /* Preserves formatting */ font-family: "Courier New", monospace; }
+        .loading { text-align: center; font-style: italic; color: #555; }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1>Teacher's Smart Grader 🤖</h1>
+        <p>Paste the question-wise rubric and upload the student's answer PDF for automated, explainable grading.</p>
+
+        <div class="input-section">
+            <div class="input-box">
+                <h3>1. Paste Question-wise Rubrics</h3>
+                <textarea id="rubric-input" placeholder="e.g.,&#10;**Rubric for Q1 (10 Marks):**&#10;- Accuracy (5 marks): ...&#10;- Clarity (5 marks): ...&#10;&#10;**Rubric for Q2 (5 Marks):**&#10;- Definition (2 marks): ..."></textarea>
+            </div>
+            <div class="input-box">
+                <h3>2. Upload Student's Answer PDF</h3>
+                <input type="file" id="answer-file" accept="application/pdf">
+                <p style="font-size: 12px; color: #666;">(File will be scanned using OCR. Clear, typed text works best.)</p>
+            </div>
+        </div>
+
+        <button id="grade-button">Grade Answer</button>
+
+        <div id="results-container" style="display:none;">
+            <h2>Evaluation Results</h2>
+            <pre id="results"></pre>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
