@@ -36,7 +36,7 @@ safety_settings = [
 ]
 # Use a model that's good with text and reasoning, like 1.5 Pro
 model = genai.GenerativeModel(
-    model_name="gemini-1.5-pro-latest",
+    model_name="gemini-2.5-flash",
     generation_config=generation_config,
     safety_settings=safety_settings
 )
@@ -55,6 +55,8 @@ def extract_text_from_pdf(pdf_file_storage):
             text = pytesseract.image_to_string(image, lang='eng')
             extracted_text += f"\n--- Page {page_num + 1} ---\n{text}\n"
         pdf_document.close()
+
+
         return extracted_text
     except Exception as e:
         print(f"Error during OCR: {e}")
@@ -109,6 +111,10 @@ def grade_answer():
         student_answer_text = extract_text_from_pdf(pdf_file)
         print("...Extraction complete.")
         
+        print("=" * 50)
+        print("--- OCR Extracted Text ---")
+        print(student_answer_text)
+        print("=" * 50)
         if not student_answer_text.strip():
              return jsonify({"error": "OCR Failure: Could not detect any text in the PDF."}), 400
 
