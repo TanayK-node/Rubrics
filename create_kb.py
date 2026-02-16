@@ -1,91 +1,51 @@
-# Save this as: create_kb.py
 import os
 import json
 import fitz  # PyMuPDF
-import google.generativeai as genai
-from dotenv import load_dotenv
-import numpy as np
+from sentence_transformers import SentenceTransformer # <--- NEW: Local Embeddings
 
-# --- Configuration ---
-load_dotenv()
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-if not GEMINI_API_KEY:
-    raise ValueError("GEMINI_API_KEY not found.")
-genai.configure(api_key=GEMINI_API_KEY)
+# Configuration
+PDF_PATH = "textbook.pdf" 
+OUTPUT_FILE = "knowledge_base.json"
 
-# Use a lightweight embedding model
-EMBEDDING_MODEL = "models/text-embedding-004"
-
-def extract_and_chunk_pdf(pdf_path, chunk_size=1000, overlap=100):
-    """
-    Reads a PDF and splits it into overlapping chunks of text.
-    Overlapping helps preserve context across cuts.
-    """
-    print(f"📄 Processing {pdf_path}...")
-    doc = fitz.open(pdf_path)
-    full_text = ""
-    for page in doc:
-        full_text += page.get_text() + "\n"
+def create_knowledge_base():
+    # 1. Load Local Model (Downloads once, then runs offline)
+    print("Download/Loading local embedding model...")
+    embedding_model = SentenceTransformer('all-MiniLM-L6-v2') 
     
-    # Simple sliding window chunking
-    chunks = []
-    start = 0
-    while start < len(full_text):
-        end = start + chunk_size
-        chunk = full_text[start:end]
-        chunks.append(chunk)
-        start += (chunk_size - overlap)
-    
-    print(f"✅ Created {len(chunks)} chunks.")
-    return chunks
+    if not os.path.exists(PDF_PATH):
+        print(f"❌ Error: {PDF_PATH} not found.")
+        return
 
-def create_vector_store(chunks):
-    """
-    Sends text chunks to Gemini API to get 'Embeddings' (Vector representations).
-    """
-    print("🧠 Generating Embeddings (this may take a moment)...")
+    print(f"📖 Reading {PDF_PATH}...")
+    doc = fitz.open(PDF_PATH)
+    
     knowledge_base = []
     
-    # Process in batches to avoid hitting API rate limits
-    batch_size = 20 
-    for i in range(0, len(chunks), batch_size):
-        batch = chunks[i:i+batch_size]
+    # Process pages
+    for page_num, page in enumerate(doc):
+        text = page.get_text()
+        if len(text) < 100: continue 
+        
+        print(f"   Processing Page {page_num + 1}...")
+        
         try:
-            # Generate embeddings for the batch
-            result = genai.embed_content(
-                model=EMBEDDING_MODEL,
-                content=batch,
-                task_type="retrieval_document"
-            )
+            # 2. Generate Embedding LOCALLY
+            # .tolist() converts the numpy array to a standard list for JSON saving
+            vector = embedding_model.encode(text).tolist()
             
-            # Store text + embedding pairing
-            for text, embedding in zip(batch, result['embedding']):
-                knowledge_base.append({
-                    "text": text,
-                    "embedding": embedding
-                })
-            print(f"   Processed batch {i} to {i+len(batch)}")
-            
+            knowledge_base.append({
+                "id": f"Page {page_num + 1}",
+                "text": text,
+                "embedding": vector
+            })
         except Exception as e:
-            print(f"   ❌ Error on batch {i}: {e}")
+            print(f"   ⚠️ Error on page {page_num}: {e}")
 
-    return knowledge_base
+    # 3. Save to disk
+    with open(OUTPUT_FILE, 'w') as f:
+        json.dump(knowledge_base, f)
+    
+    print(f"✅ Success! Knowledge Base saved to {OUTPUT_FILE} ({len(knowledge_base)} pages indexed locally).")
 
 if __name__ == "__main__":
-    # --- INSTRUCTIONS ---
-    # 1. Put your large textbook PDF in the same folder.
-    # 2. Rename it to 'textbook.pdf' or update the line below.
-    PDF_FILE = "textbook.pdf" 
-    OUTPUT_FILE = "knowledge_base.json"
-
-    if not os.path.exists(PDF_FILE):
-        print(f"❌ Error: {PDF_FILE} not found. Please add a PDF file.")
-    else:
-        text_chunks = extract_and_chunk_pdf(PDF_FILE)
-        if text_chunks:
-            kb_data = create_vector_store(text_chunks)
-            
-            # Save to disk
-            with open(OUTPUT_FILE, 'w') as f:
-                json.dump(kb_data, f)
-            print(f"🎉 Success! Knowledge base saved to {OUTPUT_FILE}")
+    create_knowledge_base()
