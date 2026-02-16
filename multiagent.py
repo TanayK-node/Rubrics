@@ -22,13 +22,13 @@ genai.configure(api_key=GEMINI_API_KEY)
 app = Flask(__name__)
 CORS(app)
 
-# We use a JSON-optimized configuration
+# JSON-optimized config
 generation_config = {
-    "temperature": 0.3,  # Slight creativity allowed for reasoning
+    "temperature": 0.3, 
     "top_p": 0.95,
     "top_k": 40,
     "max_output_tokens": 8192,
-    "response_mime_type": "application/json", # <--- FORCE JSON OUTPUT
+    "response_mime_type": "application/json",
 }
 
 safety_settings = [
@@ -38,19 +38,18 @@ safety_settings = [
     {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_ONLY_HIGH"},
 ]
 
+# Use 1.5-flash for speed/cost (Adjust model name if you have access to others)
 model = genai.GenerativeModel(
-    model_name="gemini-2.5-flash", # Use 1.5-flash for speed/cost efficiency in research
+    model_name="gemini-2.5-flash", 
     generation_config=generation_config,
     safety_settings=safety_settings
 )
 
-# --- 2. Advanced Hybrid OCR (Methodology Improvement) ---
+# --- 2. Advanced Hybrid OCR ---
 def extract_text_hybrid(pdf_file_storage):
     """
     Research-Grade Extraction:
-    1. Attempts low-cost native text extraction first.
-    2. Falls back to expensive OCR only if native text is insufficient (< 50 chars).
-    Returns: Tuple (text, method_used) for your research data logs.
+    Falls back to OCR only if native text is insufficient.
     """
     full_text = ""
     method_log = []
@@ -60,15 +59,11 @@ def extract_text_hybrid(pdf_file_storage):
         doc = fitz.open(stream=pdf_data, filetype="pdf")
         
         for page_num, page in enumerate(doc):
-            # Attempt 1: Native Extraction
             text = page.get_text()
-            
-            # Metric: Text Density Check
             if len(text.strip()) > 50:
                 full_text += f"\n--- Page {page_num + 1} (Native) ---\n{text}\n"
                 method_log.append(f"Page {page_num+1}: Native")
             else:
-                # Attempt 2: OCR Fallback
                 pix = page.get_pixmap(dpi=300)
                 img = Image.open(io.BytesIO(pix.tobytes("png")))
                 text = pytesseract.image_to_string(img)
@@ -81,60 +76,99 @@ def extract_text_hybrid(pdf_file_storage):
         print(f"Extraction Error: {e}")
         raise Exception(f"Failed to process PDF: {e}")
 
-# --- 3. The 'Critic' Architecture (Novelty) ---
-def grade_with_critic_loop(rubric, student_text):
-    """
-    Implements a 'Reflexion' loop:
-    1. Agent generates initial grade.
-    2. (Optional future step) Critic reviews it.
-    For now, we implement a structured Chain-of-Thought prompt.
-    """
-    
-    # Prompt 1: The Grader
-    # We ask for a "Reasoning Trace" before the score to improve accuracy (CoT).
-    prompt = f"""
-    You are an automated academic evaluator. Your goal is to grade a student answer based STRICTLY on the provided rubric.
+# --- 3. The Research Novelty: Actor-Critic Reflexion Loop ---
+class ReflexionLoop:
+    def __init__(self, rubric, student_text):
+        self.rubric = rubric
+        self.student_text = student_text
+        self.logs = [] # To store the "thought process" for your paper
 
-    **Input Data:**
-    <Rubric>
-    {rubric}
-    </Rubric>
+    def _call_gemini(self, prompt, role="Agent"):
+        """Helper to call Gemini and log the event."""
+        start = time.time()
+        response = model.generate_content(prompt)
+        duration = round(time.time() - start, 2)
+        self.logs.append({
+            "role": role,
+            "latency": duration,
+            "output_snippet": response.text[:100] + "..."
+        })
+        return json.loads(response.text)
 
-    <StudentAnswer>
-    {student_text}
-    </StudentAnswer>
-
-    **Task:**
-    1. Analyze the student's answer against the rubric criteria.
-    2. Extract specific quotes from the student's text that support your evaluation.
-    3. Assign a score based ONLY on the rubric.
-    
-    **Output Schema (JSON):**
-    You must return a JSON object with this exact structure:
-    {{
-      "evaluation": [
+    def run(self):
+        # --- PHASE 1: The Actor (Initial Grading) ---
+        actor_prompt = f"""
+        You are an academic grader. Grade the student answer based STRICTLY on the rubric.
+        
+        <Rubric>{self.rubric}</Rubric>
+        <StudentAnswer>{self.student_text}</StudentAnswer>
+        
+        Return JSON matching this schema:
         {{
-          "question_id": "string (e.g., Q1)",
-          "score_awarded": float,
-          "max_score": float,
-          "reasoning_trace": "string (Explain the logic for the score)",
-          "evidence_quote": "string (Direct quote from student text)",
-          "improvement_suggestion": "string (How the student could get full marks)"
+            "evaluation": [
+                {{
+                    "question_id": "string", 
+                    "score_awarded": float, 
+                    "max_score": float, 
+                    "reasoning_trace": "string", 
+                    "evidence_quote": "string"
+                }}
+            ],
+            "total_score_awarded": float,
+            "total_max_score": float,
+            "summary_feedback": "string"
         }}
-      ],
-      "total_score_awarded": float,
-      "total_max_score": float,
-      "summary_feedback": "string"
-    }}
-    """
-    
-    response = model.generate_content(prompt)
-    return response.text
+        """
+        initial_grade = self._call_gemini(actor_prompt, role="Actor (Draft)")
+
+        # --- PHASE 2: The Critic (Auditing) ---
+        # The Critic looks for specific failures: laziness, hallucinations, or harshness.
+        critic_prompt = f"""
+        You are a QA Auditor. Review this grading JSON against the student text and rubric.
+        
+        <Rubric>{self.rubric}</Rubric>
+        <StudentText>{self.student_text}</StudentText>
+        <ProposedGrading>{json.dumps(initial_grade)}</ProposedGrading>
+        
+        Task:
+        1. Check if 'evidence_quote' actually exists in StudentText.
+        2. Check if 'score_awarded' aligns with 'reasoning_trace'.
+        
+        Return JSON:
+        {{
+            "critique_valid": boolean, // True if the grading is acceptable
+            "critique_notes": "string", // If invalid, explain what to fix
+            "confidence_score": float // 0.0 to 1.0
+        }}
+        """
+        critique = self._call_gemini(critic_prompt, role="Critic (Auditor)")
+
+        # --- PHASE 3: The Resolver (Reflexion) ---
+        # If the critic is not satisfied (or confidence is low), we RE-GRADE.
+        if critique.get("critique_valid", True) and critique.get("confidence_score", 1.0) > 0.85:
+            # Acceptance: The draft is good enough.
+            self.logs.append({"action": "Critique Passed. Keeping Draft."})
+            return initial_grade, self.logs
+        else:
+            # Rejection: We must regenerate using the critic's feedback.
+            self.logs.append({"action": "Critique Failed. Regenerating..."})
+            
+            revision_prompt = f"""
+            You are a Senior Grader. The previous grading attempt was rejected by the auditor.
+            
+            <PreviousDraft>{json.dumps(initial_grade)}</PreviousDraft>
+            <AuditorFeedback>{critique.get('critique_notes')}</AuditorFeedback>
+            
+            Please re-grade the paper, specifically addressing the Auditor's feedback.
+            Return the final JSON in the same format as the initial draft.
+            """
+            final_grade = self._call_gemini(revision_prompt, role="Actor (Revision)")
+            return final_grade, self.logs
 
 # --- 4. API Endpoint ---
 @app.route('/grade', methods=['POST'])
 def grade_answer():
-    start_time = time.time() # Metric: Latency
+    start_time = time.time()
     
     try:
         if 'student_answer_pdf' not in request.files:
@@ -152,23 +186,20 @@ def grade_answer():
         if not student_text.strip():
              return jsonify({"error": "Extraction Failed: Document appears empty."}), 400
 
-        # Step B: AI Grading (The "Black Box")
-        # We parse the string response into a real JSON object
-        raw_response = grade_with_critic_loop(rubric, student_text)
-        json_response = json.loads(raw_response)
+        # Step B: Run the Reflexion Loop (Agentic Workflow)
+        agent_system = ReflexionLoop(rubric, student_text)
+        final_json, agent_logs = agent_system.run()
 
-        # Step C: Calculate Research Metrics
-        processing_time = round(time.time() - start_time, 2)
+        # Step C: Metrics
+        total_time = round(time.time() - start_time, 2)
         
-        # Step D: Construct Final Response
-        # We include 'metadata' for your research paper logging
         final_output = {
-            "result": json_response,
+            "result": final_json,
             "research_metadata": {
-                "processing_time_seconds": processing_time,
+                "processing_time_seconds": total_time,
                 "extraction_method_breakdown": extraction_methods,
-                "model_used": "gemini-1.5-flash",
-                "character_count": len(student_text)
+                "model_used": "gemini-1.5-flash (Reflexion Arch)",
+                "agent_trace": agent_logs # Pass this to UI to show "Thought Process"
             }
         }
 
@@ -179,4 +210,4 @@ def grade_answer():
         return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+    app.run(debug=True, port=5000)  
