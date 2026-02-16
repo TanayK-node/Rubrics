@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 import fitz  # PyMuPDF
 import pytesseract
 from PIL import Image
-from sentence_transformers import SentenceTransformer # <--- NEW IMPORT
+from sentence_transformers import SentenceTransformer, CrossEncoder # <--- NEW IMPORT
 
 # --- 1. Configuration & Setup ---
 load_dotenv()
@@ -32,9 +32,8 @@ generation_config = {
     "response_mime_type": "application/json",
 }
 
-# Keeping your requested model for GENERATION (still uses API)
 model = genai.GenerativeModel(
-    model_name="gemini-2.5-flash", 
+    model_name="gemini-2.0-flash", # Updated to latest efficient model
     generation_config=generation_config
 )
 
@@ -60,16 +59,21 @@ def extract_text_hybrid(pdf_file_storage):
     except Exception as e:
         raise Exception(f"Failed to process PDF: {e}")
 
-# --- 3. [UPDATED] Local Knowledge Retriever ---
+# --- 3. [UPDATED] Local Knowledge Retriever with Re-ranking ---
 class KnowledgeRetriever:
     def __init__(self, kb_path="knowledge_base.json"):
         self.kb_path = kb_path
         self.knowledge_base = []
         self.is_ready = False
         
-        # Load the Local Embedding Model (same as create_kb.py)
-        print("Loading local embedding model (SentenceTransformer)...")
-        self.embedder = SentenceTransformer('all-MiniLM-L6-v2')
+        # 1. Load Bi-Encoder (Fast Retrieval)
+        print("Loading Bi-Encoder (SentenceTransformer)...")
+        self.bi_encoder = SentenceTransformer('all-MiniLM-L6-v2')
+        
+        # 2. Load Cross-Encoder (High Accuracy Re-ranking)
+        # 'ms-marco-MiniLM-L-6-v2' is a standard research baseline for re-ranking
+        print("Loading Cross-Encoder (Re-ranker)...")
+        self.cross_encoder = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')
         
         self.load_kb()
 
@@ -78,40 +82,65 @@ class KnowledgeRetriever:
             try:
                 with open(self.kb_path, 'r') as f:
                     self.knowledge_base = json.load(f)
-                print(f"📚 RAG System: Loaded {len(self.knowledge_base)} pages from disk.")
+                
+                # Pre-convert embeddings to numpy for speed
+                for entry in self.knowledge_base:
+                    entry['embedding'] = np.array(entry['embedding'])
+                    
+                print(f"📚 RAG System: Loaded {len(self.knowledge_base)} chunks from disk.")
                 self.is_ready = True
             except Exception as e:
                 print(f"⚠️ RAG Error: Failed to load knowledge base: {e}")
         else:
-            print("⚠️ RAG Warning: knowledge_base.json not found. Grading will proceed without Ground Truth.")
+            print("⚠️ RAG Warning: knowledge_base.json not found.")
 
-    def retrieve(self, query, top_k=3):
+    def retrieve(self, query, top_k=5, candidate_pool_size=20):
         """
-        Finds the 3 most relevant textbook pages using LOCAL embeddings.
+        Two-Stage Retrieval:
+        1. Bi-Encoder: Finds top 20 'likely' chunks (Fast)
+        2. Cross-Encoder: Re-ranks them to find top 5 'actual' matches (Accurate)
         """
         if not self.is_ready: return ""
 
         try:
-            # 1. Embed the query LOCALLY
-            query_embedding = self.embedder.encode(query) # Returns numpy array
-
-            # 2. Vector Search (Cosine Similarity)
-            scored_results = []
+            # --- Stage 1: Fast Vector Search (Bi-Encoder) ---
+            query_embedding = self.bi_encoder.encode(query)
+            
+            candidates = []
             for entry in self.knowledge_base:
-                # Load stored embedding (convert list back to numpy)
-                stored_embedding = np.array(entry['embedding'])
+                # Cosine Similarity
+                score = np.dot(query_embedding, entry['embedding'])
+                candidates.append({
+                    "id": entry['id'],
+                    "text": entry['text'],
+                    "initial_score": score
+                })
+            
+            # Sort by vector score and take top N candidates
+            candidates.sort(key=lambda x: x["initial_score"], reverse=True)
+            top_candidates = candidates[:candidate_pool_size]
+
+            # --- Stage 2: Re-ranking (Cross-Encoder) ---
+            # Create pairs [ [query, doc1], [query, doc2], ... ]
+            sentence_combinations = [[query, doc['text']] for doc in top_candidates]
+            
+            # Predict similarity scores
+            cross_scores = self.cross_encoder.predict(sentence_combinations)
+            
+            # Attach new scores
+            for i, doc in enumerate(top_candidates):
+                doc['cross_score'] = cross_scores[i]
                 
-                # Dot Product
-                score = np.dot(query_embedding, stored_embedding)
-                scored_results.append((score, entry['text'], entry['id']))
+            # Sort by CROSS score (The "Gold Standard" rank)
+            top_candidates.sort(key=lambda x: x['cross_score'], reverse=True)
             
-            # 3. Sort & Select
-            scored_results.sort(key=lambda x: x[0], reverse=True)
-            top_results = scored_results[:top_k]
+            # Select Final Top K
+            final_results = top_candidates[:top_k]
             
-            # 4. Format for the Agent
-            context_str = "\n".join([f"--- Source: {x[2]} ---\n{x[1]}" for x in top_results])
+            # Format for the Agent
+            context_str = "\n".join([f"--- Source: {x['id']} (Relevance: {x['cross_score']:.2f}) ---\n{x['text']}" for x in final_results])
             return context_str
+
         except Exception as e:
             print(f"Retrieval Error: {e}")
             return ""
@@ -119,14 +148,14 @@ class KnowledgeRetriever:
 # Initialize Global Retriever
 retriever = KnowledgeRetriever()
 
-# --- 4. The Agentic Reflexion Loop (Unchanged Logic) ---
+# --- 4. The Agentic Reflexion Loop (Unchanged) ---
 class ReflexionLoop:
     def __init__(self, rubric, student_text):
         self.rubric = rubric
         self.student_text = student_text
         self.logs = [] 
         
-        # Retrieve Truth using the new Local Retriever
+        # Retrieve Truth using the new Two-Stage Retriever
         self.truth_context = retriever.retrieve(rubric)
         if self.truth_context:
             self.logs.append({"system_action": "RAG_RETRIEVAL", "status": "Success", "context_length": len(self.truth_context)})
@@ -135,14 +164,19 @@ class ReflexionLoop:
 
     def _call_gemini(self, prompt, role="Agent"):
         start = time.time()
-        response = model.generate_content(prompt)
-        duration = round(time.time() - start, 2)
-        self.logs.append({
-            "role": role,
-            "latency": duration,
-            "output_snippet": response.text[:100] + "..."
-        })
-        return json.loads(response.text)
+        try:
+            response = model.generate_content(prompt)
+            duration = round(time.time() - start, 2)
+            self.logs.append({
+                "role": role,
+                "latency": duration,
+                "output_snippet": response.text[:100] + "..."
+            })
+            return json.loads(response.text)
+        except Exception as e:
+            # Error handling for JSON parsing or API issues
+            self.logs.append({"role": role, "error": str(e)})
+            return {"error": str(e)}
 
     def run(self):
         # PHASE 1: The Actor (Draft)
@@ -152,7 +186,7 @@ class ReflexionLoop:
         <Instructions>
         1. Grade the student answer based on the <Rubric>.
         2. Use the <TruthContext> (Textbook Material) to verify facts.
-        3. If the student's answer contradicts the <TruthContext>, deduct marks even if it looks plausible.
+        3. If the student's answer contradicts the <TruthContext>, deduct marks.
         </Instructions>
         
         <TruthContext>
@@ -199,7 +233,7 @@ class ReflexionLoop:
             final_grade = self._call_gemini(revision_prompt, role="Actor (Revision)")
             return final_grade, self.logs
 
-# --- 5. API Endpoint (Unchanged) ---
+# --- 5. API Endpoint (Standard) ---
 @app.route('/grade', methods=['POST'])
 def grade_answer():
     start_time = time.time()
@@ -211,22 +245,19 @@ def grade_answer():
         pdf_file = request.files['student_answer_pdf']
         if not rubric: return jsonify({"error": "Rubric is required."}), 400
         
-        # Step A: Hybrid Extraction
         student_text, extraction_methods = extract_text_hybrid(pdf_file)
         if not student_text.strip(): return jsonify({"error": "Extraction Failed."}), 400
 
-        # Step B: Run Reflexion
         agent_system = ReflexionLoop(rubric, student_text)
         final_json, agent_logs = agent_system.run()
 
-        # Step C: Metrics
         total_time = round(time.time() - start_time, 2)
         final_output = {
             "result": final_json,
             "research_metadata": {
                 "processing_time_seconds": total_time,
                 "extraction_method_breakdown": extraction_methods,
-                "model_used": "gemini-2.5-flash (Local RAG + Reflexion)",
+                "model_used": "gemini-2.0-flash (Hybrid RAG + Reflexion)",
                 "agent_trace": agent_logs 
             }
         }
