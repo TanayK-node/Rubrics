@@ -5,7 +5,11 @@ from flask_cors import CORS
 import google.generativeai as genai  # <-- Import Gemini
 from dotenv import load_dotenv          # <-- Import dotenv
 import fitz  # PyMuPDF
+
 import pytesseract
+
+pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+
 from PIL import Image
 
 # --- 1. Load .env and Configure API Key ---
