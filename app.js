@@ -2,13 +2,13 @@ document.addEventListener("DOMContentLoaded", () => {
     const gradeButton = document.getElementById("grade-button");
     const rubricInput = document.getElementById("rubric-input");
     const answerFileInput = document.getElementById("answer-file");
-    
+
     // Output Elements
     const resultsArea = document.getElementById("results-area");
     const tableBody = document.getElementById("grading-table-body");
     const displayScore = document.getElementById("display-score");
     const displayFeedback = document.getElementById("display-feedback");
-    
+
     // Metric Elements
     const metricTime = document.getElementById("metric-time");
     const metricMethod = document.getElementById("metric-method");
@@ -47,9 +47,9 @@ document.addEventListener("DOMContentLoaded", () => {
             // We need to parse that string into a real Object
             let aiResult;
             if (typeof data.result === "string") {
-                 aiResult = JSON.parse(data.result);
+                aiResult = JSON.parse(data.result);
             } else {
-                 aiResult = data.result;
+                aiResult = data.result;
             }
 
             // 5. Update Research Metrics
@@ -63,6 +63,30 @@ document.addEventListener("DOMContentLoaded", () => {
             displayFeedback.textContent = aiResult.summary_feedback;
 
             // 7. Build the Table (The "Reasoning Trace")
+            if (!data.result) {
+                console.error("No result field in response:", data);
+                alert("Backend did not return grading result.");
+                return;
+            }
+
+            if (typeof data.result === "string") {
+                try {
+                    aiResult = JSON.parse(data.result);
+                } catch (err) {
+                    console.error("Failed to parse AI JSON:", data.result);
+                    alert("Invalid AI JSON format.");
+                    return;
+                }
+            } else {
+                aiResult = data.result;
+            }
+
+            if (!aiResult || !Array.isArray(aiResult.evaluation)) {
+                console.error("Invalid AI response structure:", aiResult);
+                alert("AI response format error. Check console.");
+                return;
+            }
+
             aiResult.evaluation.forEach(item => {
                 const row = document.createElement("tr");
 

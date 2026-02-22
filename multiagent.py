@@ -5,7 +5,8 @@ import time
 import numpy as np 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 from dotenv import load_dotenv
 import fitz  # PyMuPDF
 import pytesseract
@@ -19,23 +20,18 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 if not GEMINI_API_KEY:
     raise ValueError("GEMINI_API_KEY not found. Please set it in your .env file.")
 
-genai.configure(api_key=GEMINI_API_KEY)
+client = genai.Client(api_key=GEMINI_API_KEY)
 
 app = Flask(__name__)
 CORS(app)
 
 generation_config = {
-    "temperature": 0.3, 
+    "temperature": 0.3,
     "top_p": 0.95,
     "top_k": 40,
     "max_output_tokens": 8192,
-    "response_mime_type": "application/json",
 }
 
-model = genai.GenerativeModel(
-    model_name="gemini-2.0-flash", # Updated to latest efficient model
-    generation_config=generation_config
-)
 
 # --- 2. OCR Function (Unchanged) ---
 def extract_text_hybrid(pdf_file_storage):
@@ -165,18 +161,29 @@ class ReflexionLoop:
     def _call_gemini(self, prompt, role="Agent"):
         start = time.time()
         try:
-            response = model.generate_content(prompt)
+            response = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=prompt,
+                config={
+                    **generation_config,
+                    "response_mime_type": "application/json"
+                }
+            )
+
             duration = round(time.time() - start, 2)
+
             self.logs.append({
                 "role": role,
                 "latency": duration,
                 "output_snippet": response.text[:100] + "..."
             })
+
             return json.loads(response.text)
+
         except Exception as e:
-            # Error handling for JSON parsing or API issues
             self.logs.append({"role": role, "error": str(e)})
             return {"error": str(e)}
+
 
     def run(self):
         # PHASE 1: The Actor (Draft)
