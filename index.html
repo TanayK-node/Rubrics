@@ -3,112 +3,96 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Smart Grader - Research Demo</title>
+    <title>Bulk Paper Grading System</title>
     <style>
-        :root { --primary: #2c3e50; --secondary: #3498db; --accent: #e74c3c; --bg: #f8f9fa; }
-        body { font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; margin: 0; padding: 20px; background: var(--bg); color: #333; }
-        .container { max-width: 1200px; margin: auto; background: #fff; padding: 30px; border-radius: 12px; box-shadow: 0 5px 20px rgba(0,0,0,0.08); }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f7f6; color: #333; margin: 0; padding: 20px; }
+        .container { max-width: 900px; margin: 0 auto; background: #fff; padding: 30px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        h1, h2 { color: #2c3e50; }
+        .form-group { margin-bottom: 20px; }
+        label { display: block; font-weight: bold; margin-bottom: 8px; }
+        input[type="text"], input[type="password"], textarea { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+        input[type="file"] { border: 1px dashed #ccc; padding: 10px; width: 100%; box-sizing: border-box; background: #fafafa; }
+        button { background-color: #3498db; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; }
+        button:hover { background-color: #2980b9; }
+        button:disabled { background-color: #95a5a6; cursor: not-allowed; }
         
-        /* Header */
-        h1 { text-align: center; color: var(--primary); margin-bottom: 10px; }
-        .subtitle { text-align: center; color: #666; margin-bottom: 30px; font-style: italic; }
-
-        /* Input Section */
-        .input-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 30px; margin-bottom: 30px; }
-        .input-card { background: #fff; padding: 20px; border: 1px solid #eee; border-radius: 8px; }
-        label { display: block; font-weight: 600; margin-bottom: 10px; color: var(--primary); }
-        textarea { width: 100%; height: 300px; padding: 15px; border: 1px solid #ddd; border-radius: 6px; font-family: monospace; resize: vertical; }
-        input[type="file"] { width: 100%; padding: 10px; background: #f1f1f1; border-radius: 6px; }
-
-        /* Button */
-        .grade-btn { width: 100%; padding: 18px; background: var(--secondary); color: white; border: none; border-radius: 8px; font-size: 18px; font-weight: bold; cursor: pointer; transition: 0.2s; }
-        .grade-btn:hover { background: #2980b9; }
-        .grade-btn:disabled { background: #bdc3c7; cursor: wait; }
-
-        /* Results Section */
-        #results-area { display: none; margin-top: 40px; border-top: 2px solid #eee; padding-top: 20px; }
+        /* Table Styles */
+        #results-section { display: none; margin-top: 30px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+        th, td { padding: 12px; border: 1px solid #ddd; text-align: left; }
+        th { background-color: #f2f2f2; }
+        .status-pending { color: #f39c12; font-weight: bold; }
+        .status-done { color: #27ae60; font-weight: bold; }
+        .status-error { color: #c0392b; font-weight: bold; }
         
-        /* Metrics Bar (For your Paper) */
-        .metrics-bar { display: flex; justify-content: space-between; background: #e8f6f3; padding: 15px; border-radius: 8px; margin-bottom: 25px; border: 1px solid #d1f2eb; }
-        .metric-item { text-align: center; }
-        .metric-val { font-size: 1.2em; font-weight: bold; color: #16a085; }
-        .metric-label { font-size: 0.85em; color: #555; text-transform: uppercase; letter-spacing: 0.5px; }
-
-        /* Score Summary */
-        .score-box { background: var(--primary); color: white; padding: 20px; border-radius: 8px; text-align: center; margin-bottom: 25px; }
-        .final-score { font-size: 2.5em; font-weight: 800; }
-
-        /* Grading Table */
-        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-        th { background: #f1f1f1; padding: 12px; text-align: left; font-weight: 600; border-bottom: 2px solid #ddd; }
-        td { padding: 15px; border-bottom: 1px solid #eee; vertical-align: top; }
-        tr:hover { background: #fafafa; }
-        
-        .q-col { width: 80px; font-weight: bold; }
-        .score-col { width: 100px; font-weight: bold; color: var(--secondary); }
-        .quote { display: block; margin-top: 8px; font-style: italic; color: #666; font-size: 0.9em; border-left: 3px solid #ddd; padding-left: 10px; }
-        .suggestion { color: var(--accent); font-size: 0.9em; margin-top: 5px; }
+        /* Modal Styles */
+        #feedbackModal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); }
+        .modal-content { background: #fff; width: 80%; max-width: 600px; margin: 50px auto; padding: 20px; border-radius: 8px; max-height: 80vh; overflow-y: auto; }
+        .close-btn { float: right; cursor: pointer; font-size: 20px; font-weight: bold; }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <h1>📄 Automated Paper Grader (Hybrid OCR)</h1>
-    <p class="subtitle">Research Prototype: Generative AI with Chain-of-Thought Reasoning</p>
+    <h1>Automated Grading System</h1>
+    
+    <!-- Upload Section -->
+    <div id="upload-section">
+        <form id="gradingForm">
+            <div class="form-group">
+                <label for="apiKey">API Key (Optional / User Provided):</label>
+                <input type="password" id="apiKey" name="apiKey" placeholder="Enter API Key here...">
+            </div>
 
-    <div class="input-grid">
-        <div class="input-card">
-            <label>1. Grading Rubric (Paste Here)</label>
-            <textarea id="rubric-input" placeholder="e.g., Q1 (5 marks): Award 1 mark for definition, 2 marks for examples..."></textarea>
-        </div>
-        <div class="input-card">
-            <label>2. Student Answer (PDF)</label>
-            <input type="file" id="answer-file" accept="application/pdf">
-            <p style="font-size: 0.9em; color: #777; margin-top: 10px;">
-                <strong>Note:</strong> System uses Hybrid extraction (Native Text -> OCR Fallback).
-            </p>
-        </div>
+            <!-- UPDATED: Now accepts multiple PDFs for the Knowledge Base -->
+            <div class="form-group">
+                <label for="knowledgeBase">Course Content / Textbooks (Upload PDFs):</label>
+                <input type="file" id="knowledgeBase" name="knowledgeBase" accept=".pdf" multiple required>
+            </div>
+
+            <div class="form-group">
+                <label for="rubric">Grading Rubric:</label>
+                <textarea id="rubric" name="rubric" rows="4" placeholder="Paste the specific rubric for this assignment..." required></textarea>
+            </div>
+
+            <!-- Upload for the actual student answers -->
+            <div class="form-group">
+                <label for="answerPapers">Upload Answer Papers (Bulk PDFs):</label>
+                <input type="file" id="answerPapers" name="answerPapers" accept=".pdf" multiple required>
+            </div>
+
+            <button type="submit" id="submitBtn">Grade Papers</button>
+        </form>
     </div>
 
-    <button id="grade-button" class="grade-btn">🚀 Run Evaluation</button>
-
-    <div id="results-area">
+    <!-- Results Dashboard Section -->
+    <div id="results-section">
+        <h2>Grading Dashboard</h2>
+        <p id="overall-status">Status: <strong>Initializing...</strong></p>
         
-        <div class="metrics-bar">
-            <div class="metric-item">
-                <div class="metric-val" id="metric-time">--s</div>
-                <div class="metric-label">Processing Latency</div>
-            </div>
-            <div class="metric-item">
-                <div class="metric-val" id="metric-model">Gemini 1.5</div>
-                <div class="metric-label">Reasoning Model</div>
-            </div>
-            <div class="metric-item">
-                <div class="metric-val" id="metric-method">--</div>
-                <div class="metric-label">Extraction Method</div>
-            </div>
-        </div>
-
-        <div class="score-box">
-            <div>TOTAL SCORE</div>
-            <div class="final-score" id="display-score">0 / 0</div>
-            <div id="display-feedback" style="margin-top: 10px; opacity: 0.9;"></div>
-        </div>
-
-        <h3>Detailed Breakdown</h3>
-        <table>
+        <table id="resultsTable">
             <thead>
                 <tr>
-                    <th>Q#</th>
+                    <th>Student / File Name</th>
+                    <th>Status</th>
                     <th>Score</th>
-                    <th>Reasoning Trace & Evidence</th>
+                    <th>Action</th>
                 </tr>
             </thead>
-            <tbody id="grading-table-body">
-                </tbody>
+            <tbody id="resultsBody">
+                <!-- Rows will be populated by app.js -->
+            </tbody>
         </table>
     </div>
+</div>
 
+<!-- Feedback Modal -->
+<div id="feedbackModal">
+    <div class="modal-content">
+        <span class="close-btn" id="closeModal">&times;</span>
+        <h2 id="modalTitle">Feedback Details</h2>
+        <div id="modalBody"></div>
+    </div>
 </div>
 
 <script src="app.js"></script>
